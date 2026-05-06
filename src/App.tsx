@@ -60,6 +60,17 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+interface PendingUpdate {
+  pluginId: string;
+  name: string;
+  oldCategory: string;
+  newCategory?: string;
+  newSynthesis?: string;
+  newSaturation?: string;
+  newTags?: string[];
+  selected: boolean;
+}
+
 export default function App() {
   const [currentView, setCurrentView] = useState<'dashboard' | 'plugins' | 'word-generator' | 'settings' | 'show-prep' | 'routing' | 'project-anatomy'>('dashboard');
   const [sharedProject, setSharedProject] = useState<DAWProject | null>(null);
@@ -114,6 +125,7 @@ export default function App() {
   const [pluginTab, setPluginTab] = useState<'details' | 'encyclopedia'>('details');
   const [isBulkCategorizing, setIsBulkCategorizing] = useState(false);
   const [bulkTagInput, setBulkTagInput] = useState("");
+  const [pendingUpdates, setPendingUpdates] = useState<PendingUpdate[] | null>(null);
 
   const handleAIAutoTag = async () => {
     if (selectedIds.size === 0) return;
@@ -129,25 +141,62 @@ export default function App() {
     const result = await bulkCategorizePlugins(targets);
     
     if (result) {
-       setPlugins(prev => prev.map(p => {
-          if (result[p.id]) {
-             const updates: Partial<PluginData> = {};
-             if (result[p.id].category && p.category === 'Unknown') updates.category = result[p.id].category;
-             if (result[p.id].synthesisType) updates.synthesisType = result[p.id].synthesisType as any;
-             if (result[p.id].saturationType) updates.saturationType = result[p.id].saturationType as any;
-             if (result[p.id].tags) updates.tags = [...new Set([...(p.tags || []), ...(result[p.id].tags || [])])];
-             
-             return { ...p, ...updates };
+       const updates: PendingUpdate[] = [];
+       targets.forEach(t => {
+          if (result[t.id]) {
+             const r = result[t.id];
+             const p = plugins.find(x => x.id === t.id);
+             updates.push({
+               pluginId: t.id,
+               name: t.name,
+               oldCategory: p?.category || 'Unknown',
+               newCategory: r.category && p?.category === 'Unknown' ? r.category : undefined,
+               newSynthesis: r.synthesisType,
+               newSaturation: r.saturationType,
+               newTags: r.tags,
+               selected: true
+             });
           }
-          return p;
-       }));
-       addLog({ message: `AI successfully categorized ${selectedIds.size} plugins.`, type: 'success' });
-       setSelectedIds(new Set());
+       });
+       if (updates.length > 0) {
+         setPendingUpdates(updates);
+       } else {
+         addLog({ message: `AI found no un-tagged plugins to update.`, type: 'info' });
+         setIsBulkCategorizing(false);
+       }
     } else {
        addLog({ message: `AI batch auto-tag failed.`, type: 'error' });
+       setIsBulkCategorizing(false);
     }
-    
-    setIsBulkCategorizing(false);
+  };
+
+  const applyPendingUpdates = () => {
+     if (!pendingUpdates) return;
+     
+     const selectedUpdates = pendingUpdates.filter(u => u.selected);
+     if (selectedUpdates.length === 0) {
+        setPendingUpdates(null);
+        setIsBulkCategorizing(false);
+        return;
+     }
+
+     setPlugins(prev => prev.map(p => {
+        const update = selectedUpdates.find(u => u.pluginId === p.id);
+        if (update) {
+           const nextOptions: Partial<PluginData> = {};
+           if (update.newCategory) nextOptions.category = update.newCategory;
+           if (update.newSynthesis) nextOptions.synthesisType = update.newSynthesis as any;
+           if (update.newSaturation) nextOptions.saturationType = update.newSaturation as any;
+           if (update.newTags) nextOptions.tags = [...new Set([...(p.tags || []), ...(update.newTags || [])])];
+           return { ...p, ...nextOptions };
+        }
+        return p;
+     }));
+
+     addLog({ message: `Applied AI tags to ${selectedUpdates.length} plugins.`, type: 'success' });
+     setSelectedIds(new Set());
+     setPendingUpdates(null);
+     setIsBulkCategorizing(false);
   };
 
 
@@ -1233,6 +1282,114 @@ export default function App() {
       <AnimatePresence>
         {isConsoleOpen && (
           <SystemConsole logs={logs} onClose={() => setIsConsoleOpen(false)} />
+        )}
+
+        {pendingUpdates && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+          >
+             <motion.div 
+               initial={{ scale: 0.95 }}
+               animate={{ scale: 1 }}
+               exit={{ scale: 0.95 }}
+               className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-4xl max-h-[80vh] flex flex-col overflow-hidden shadow-2xl"
+             >
+                <div className="p-4 border-b border-gray-800 flex items-center justify-between bg-gray-950/50">
+                   <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                     <Activity className="w-4 h-4 text-indigo-400" />
+                     Review AI Categorization
+                   </h2>
+                   <button onClick={() => { setPendingUpdates(null); setIsBulkCategorizing(false); }} className="text-gray-500 hover:text-white transition-colors">
+                      <X className="w-4 h-4" />
+                   </button>
+                </div>
+                
+                <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-4">
+                   <div className="text-xs text-gray-400 mb-4 bg-gray-800/50 p-3 rounded-lg border border-gray-800">
+                     Review the AI-generated classifications below. Deselect any items you do not wish to apply.
+                   </div>
+                   <table className="w-full text-left text-sm text-gray-300">
+                     <thead className="bg-gray-800/50 text-xs uppercase text-gray-500">
+                       <tr>
+                         <th className="px-3 py-2 w-10 rounded-tl-lg">
+                           <input type="checkbox" className="rounded border-gray-700 bg-gray-900 focus:ring-indigo-500 focus:ring-offset-gray-900" 
+                             checked={pendingUpdates.every(u => u.selected)}
+                             onChange={(e) => setPendingUpdates(prev => prev!.map(u => ({ ...u, selected: e.target.checked })))}
+                           />
+                         </th>
+                         <th className="px-3 py-2 font-medium">Plugin</th>
+                         <th className="px-3 py-2 font-medium">Category / Tags</th>
+                         <th className="px-3 py-2 font-medium rounded-tr-lg">Synthesis / Saturation</th>
+                       </tr>
+                     </thead>
+                     <tbody className="divide-y divide-gray-800/50">
+                        {pendingUpdates.map(u => (
+                          <tr key={u.pluginId} className={cn("transition-colors", u.selected ? "bg-indigo-500/5 hover:bg-indigo-500/10" : "bg-transparent opacity-50")}>
+                             <td className="px-3 py-3">
+                               <input type="checkbox" className="rounded border-gray-700 bg-gray-900 focus:ring-indigo-500 focus:ring-offset-gray-900 cursor-pointer"
+                                  checked={u.selected}
+                                  onChange={(e) => setPendingUpdates(prev => prev!.map(p => p.pluginId === u.pluginId ? { ...p, selected: e.target.checked } : p))}
+                               />
+                             </td>
+                             <td className="px-3 py-3">
+                                <div className="font-bold text-white truncate max-w-[150px]">{u.name}</div>
+                                <div className="text-[10px] text-gray-500 uppercase tracking-widest mt-0.5">Current: {u.oldCategory}</div>
+                             </td>
+                             <td className="px-3 py-3">
+                                {u.newCategory && (
+                                   <div className="text-xs text-indigo-300 mb-1.5 font-bold flex items-center gap-1.5">
+                                      <RefreshCw className="w-3 h-3" />
+                                      {u.newCategory}
+                                   </div>
+                                )}
+                                {u.newTags && u.newTags.length > 0 && (
+                                   <div className="flex flex-wrap gap-1">
+                                      {u.newTags.map(t => (
+                                         <span key={t} className="text-[9px] uppercase tracking-wider bg-indigo-500/10 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-500/20">{t}</span>
+                                      ))}
+                                   </div>
+                                )}
+                                {!u.newCategory && (!u.newTags || u.newTags.length === 0) && (
+                                  <span className="text-gray-600 text-xs italic">No changes</span>
+                                )}
+                             </td>
+                             <td className="px-3 py-3">
+                                <div className="flex flex-wrap gap-1.5">
+                                   {u.newSynthesis && u.newSynthesis !== 'None' && <span className="text-[10px] uppercase font-bold text-sky-400 bg-sky-500/10 px-2 py-0.5 rounded border border-sky-500/20">{u.newSynthesis}</span>}
+                                   {u.newSaturation && u.newSaturation !== 'None' && <span className="text-[10px] uppercase font-bold text-orange-400 bg-orange-500/10 px-2 py-0.5 rounded border border-orange-500/20">{u.newSaturation}</span>}
+                                   {(!u.newSynthesis || u.newSynthesis === 'None') && (!u.newSaturation || u.newSaturation === 'None') && (
+                                     <span className="text-gray-600 text-xs italic">N/A</span>
+                                   )}
+                                </div>
+                             </td>
+                          </tr>
+                        ))}
+                     </tbody>
+                   </table>
+                </div>
+
+                <div className="p-4 border-t border-gray-800 bg-gray-950/50 flex items-center justify-between">
+                   <div className="text-xs text-gray-500 font-mono">
+                     {pendingUpdates.filter(u => u.selected).length} / {pendingUpdates.length} Selected
+                   </div>
+                   <div className="flex gap-3">
+                     <button onClick={() => { setPendingUpdates(null); setIsBulkCategorizing(false); }} className="px-4 py-2 text-xs font-bold text-gray-400 hover:text-white hover:bg-gray-800 rounded transition-colors">
+                        Cancel
+                     </button>
+                     <button 
+                        onClick={applyPendingUpdates} 
+                        disabled={pendingUpdates.filter(u => u.selected).length === 0}
+                        className="px-6 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed rounded flex items-center gap-2 shadow-lg shadow-indigo-500/20 transition-all"
+                     >
+                        <CheckCircle2 className="w-4 h-4" /> Apply {pendingUpdates.filter(u => u.selected).length} Updates
+                     </button>
+                   </div>
+                </div>
+             </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
 
