@@ -13,10 +13,11 @@ const TEMPLATES = [
   "{word}",
   "{word} {word}",
   "The {word} of {word}",
-  "{word} {word} {word}",
   "Project {word}",
   "{word}izer",
-  "Auto{word}"
+  "Auto{word}",
+  "{word}-{wildcard}",
+  "Model {wildcard} {word}"
 ];
 
 export function WordStudio() {
@@ -64,6 +65,13 @@ export function WordStudio() {
         for (const _ of matches) {
            const randomWord = words[Math.floor(Math.random() * words.length)];
            result = result.replace("{word}", randomWord);
+        }
+
+        const wildcards = result.match(/\{wildcard\}/g) || [];
+        for (const _ of wildcards) {
+           const prefix = ['RX', 'VX', 'SYS', 'MOD', 'OSC', 'LFO', 'KRG'][Math.floor(Math.random() * 7)];
+           const suffix = Math.floor(Math.random() * 999).toString().padStart(3, '0');
+           result = result.replace("{wildcard}", `${prefix}-${suffix}`);
         }
         results.push(result);
     }

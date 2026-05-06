@@ -59,23 +59,35 @@ export function ShowPrep({ plugins, initialProject }: { plugins: PluginData[], i
     }));
   };
 
-  const systemLoad = useMemo(() => {
-    let dummyCpu = 0;
-    let dummyRam = 0;
-    tracks.forEach(t => {
+  const tracksWithLoad = useMemo(() => {
+    return tracks.map(t => {
+      let dummyCpu = 0;
+      let dummyRam = 0;
       t.plugins.forEach(pId => {
         const p = plugins.find(x => x.id === pId);
         if (p) {
-          dummyRam += p.sizeMb ? p.sizeMb * 0.5 : 50; // Random ram estimate
+          dummyRam += p.sizeMb ? p.sizeMb * 0.5 : 50;
           dummyCpu += p.category.toLowerCase().includes('synth') ? 4 : 1.5;
         }
       });
+      
+      const needsStemBouncing = dummyCpu > 12;
+      return { ...t, dummyCpu, dummyRam, needsStemBouncing };
+    });
+  }, [tracks, plugins]);
+
+  const systemLoad = useMemo(() => {
+    let dummyCpu = 0;
+    let dummyRam = 0;
+    tracksWithLoad.forEach(t => {
+      dummyCpu += t.dummyCpu;
+      dummyRam += t.dummyRam;
     });
     return {
       cpu: Math.min(dummyCpu, 100),
       ram: Math.min(dummyRam, 16000)
     };
-  }, [tracks, plugins]);
+  }, [tracksWithLoad]);
 
   return (
     <div className="flex-1 flex flex-col md:flex-row overflow-hidden bg-gray-950">
@@ -137,7 +149,7 @@ export function ShowPrep({ plugins, initialProject }: { plugins: PluginData[], i
 
         <div className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar relative z-10">
           <AnimatePresence>
-            {tracks.map(track => (
+            {tracksWithLoad.map(track => (
               <motion.div 
                 key={track.id}
                 layout
@@ -159,7 +171,7 @@ export function ShowPrep({ plugins, initialProject }: { plugins: PluginData[], i
                     addPluginToTrack(track.id, pluginId);
                   }
                 }}
-                className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden shadow-lg shadow-black/20 transition-colors duration-200"
+                className={`bg-gray-900 border ${track.needsStemBouncing ? 'border-amber-500/50' : 'border-gray-800'} rounded-xl overflow-hidden shadow-lg shadow-black/20 transition-colors duration-200`}
               >
                 <div className="flex items-center p-3 border-b border-gray-800 bg-gray-950/50">
                   <div className="w-3 h-3 rounded-full mr-3 shrink-0" style={{ backgroundColor: track.color }} />
@@ -178,6 +190,13 @@ export function ShowPrep({ plugins, initialProject }: { plugins: PluginData[], i
                     <option value="bus">Bus</option>
                     <option value="return">Return</option>
                   </select>
+
+                  {track.needsStemBouncing && (
+                     <div className="mr-4 px-2 py-1 rounded bg-amber-500/20 text-amber-400 text-[10px] font-bold uppercase tracking-widest border border-amber-500/50 flex items-center gap-1.5 animate-pulse">
+                        <Activity className="w-3 h-3" />
+                        CPU High ({(track.dummyCpu || 0).toFixed(1)}%) - Stem-ify Recommended
+                     </div>
+                  )}
 
                   <button onClick={() => removeTrack(track.id)} className="p-2 text-gray-600 hover:text-red-400 transition-colors">
                     <Trash2 className="w-4 h-4" />
@@ -201,9 +220,14 @@ export function ShowPrep({ plugins, initialProject }: { plugins: PluginData[], i
                         >
                           <Trash2 className="w-3 h-3" />
                         </button>
-                        <div className="flex gap-2 mt-4">
-                           <div className="flex-1 h-1 bg-gray-800 rounded overflow-hidden">
-                              <div className="h-full bg-blue-500/50 w-full" />
+                        <div className="flex gap-2 mt-4 items-center">
+                           <div className="text-[8px] uppercase tracking-widest text-emerald-500">VU</div>
+                           <div className="flex-1 h-1 bg-gray-800 rounded overflow-hidden flex">
+                              <motion.div 
+                                className="h-full bg-emerald-500/70" 
+                                animate={{ width: ['30%', '80%', '40%', '95%', '50%'] }}
+                                transition={{ repeat: Infinity, duration: 1.5 + Math.random(), ease: "anticipate" }}
+                              />
                            </div>
                         </div>
                       </div>

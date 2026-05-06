@@ -44,6 +44,8 @@ export interface PluginData {
   aiSummary?: string;
   tips?: string[];
   youtubeQuery?: string;
+  synthesisType?: 'Subtractive' | 'FM' | 'Wavetable' | 'Granular' | 'Additive' | 'Physical Modeling' | 'None';
+  saturationType?: 'Tube' | 'Tape' | 'Solid State' | 'Bitcrush' | 'Transformer' | 'None';
   aiSuggestions?: {
     manufacturer?: string;
     category?: string;
@@ -69,9 +71,14 @@ export type ExplorerItem = {
 export interface TrackLayer {
   id: string;
   name: string;
-  type: 'audio' | 'midi' | 'bus' | 'return';
+  type: 'audio' | 'midi' | 'bus' | 'return' | 'folder';
   color: string;
   plugins: string[]; // Plugin IDs
+  isFolder?: boolean;
+  parentId?: string; // ID of parent folder track
+  sidechainInputs?: string[]; // IDs of tracks acting as sidechains
+  cpuLoadPercent?: number; // CPU load of this track's plugins
+  needsStemBouncing?: boolean;
 }
 
 export interface MidiMapping {

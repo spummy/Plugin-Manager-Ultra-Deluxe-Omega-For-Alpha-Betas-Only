@@ -45,7 +45,7 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { INITIAL_PLUGINS } from './data/plugins';
 import { PluginData, ExplorerItem, LogEntry, AppSettings, DAWProject } from './types';
-import { researchPlugin } from './lib/gemini';
+import { researchPlugin, bulkCategorizePlugins } from './lib/gemini';
 import { WordStudio } from './components/WordStudio';
 import { SystemConsole } from './components/Console';
 import { EncyclopediaPane } from './components/EncyclopediaPane';
@@ -112,6 +112,44 @@ export default function App() {
   const [sortConfig, setSortConfig] = useState<{key: keyof PluginData, direction: 'asc'|'desc'}>({ key: 'name', direction: 'asc' });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [pluginTab, setPluginTab] = useState<'details' | 'encyclopedia'>('details');
+  const [isBulkCategorizing, setIsBulkCategorizing] = useState(false);
+  const [bulkTagInput, setBulkTagInput] = useState("");
+
+  const handleAIAutoTag = async () => {
+    if (selectedIds.size === 0) return;
+    setIsBulkCategorizing(true);
+    addLog({ message: `AI batch auto-tagging ${selectedIds.size} plugins...`, type: 'info' });
+    
+    const targets = plugins.filter(p => selectedIds.has(p.id)).map(p => ({
+       id: p.id,
+       name: p.name,
+       manufacturer: p.manufacturer
+    }));
+
+    const result = await bulkCategorizePlugins(targets);
+    
+    if (result) {
+       setPlugins(prev => prev.map(p => {
+          if (result[p.id]) {
+             const updates: Partial<PluginData> = {};
+             if (result[p.id].category && p.category === 'Unknown') updates.category = result[p.id].category;
+             if (result[p.id].synthesisType) updates.synthesisType = result[p.id].synthesisType as any;
+             if (result[p.id].saturationType) updates.saturationType = result[p.id].saturationType as any;
+             if (result[p.id].tags) updates.tags = [...new Set([...(p.tags || []), ...(result[p.id].tags || [])])];
+             
+             return { ...p, ...updates };
+          }
+          return p;
+       }));
+       addLog({ message: `AI successfully categorized ${selectedIds.size} plugins.`, type: 'success' });
+       setSelectedIds(new Set());
+    } else {
+       addLog({ message: `AI batch auto-tag failed.`, type: 'error' });
+    }
+    
+    setIsBulkCategorizing(false);
+  };
+
 
   const addLog = (log: Omit<LogEntry, 'id' | 'timestamp'>) => {
     const entry: LogEntry = {
@@ -746,10 +784,57 @@ export default function App() {
              {selectedIds.size > 0 && (
                 <div className="flex items-center gap-3">
                   <span className="text-xs text-gray-500 font-mono">{selectedIds.size} Selected</span>
-                  <button className="text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded flex items-center gap-2 border border-gray-700/50">
+                  
+                  <div className="h-4 w-px bg-gray-800 mx-2" />
+                  
+                  <div className="flex items-center gap-2 bg-gray-800/50 border border-gray-700/50 rounded-lg px-2">
+                     <Tag className="w-3 h-3 text-gray-400" />
+                     <select 
+                       className="bg-transparent text-xs text-gray-300 py-1.5 outline-none w-32"
+                       onChange={(e) => {
+                          if (!e.target.value) return;
+                          setPlugins(prev => prev.map(p => selectedIds.has(p.id) ? { ...p, category: e.target.value } : p));
+                          e.target.value = "";
+                       }}
+                     >
+                       <option value="">Bulk Set Category...</option>
+                       <option value="Synth">Synth</option>
+                       <option value="EQ">EQ</option>
+                       <option value="Dynamics">Dynamics</option>
+                       <option value="Reverb">Reverb</option>
+                       <option value="Saturation">Saturation</option>
+                     </select>
+                  </div>
+                  
+                  <div className="flex items-center gap-2 bg-gray-800/50 border border-gray-700/50 rounded-lg px-2 overflow-hidden">
+                     <input 
+                       value={bulkTagInput}
+                       onChange={(e) => setBulkTagInput(e.target.value)}
+                       placeholder="Add custom tag (Enter)..."
+                       className="bg-transparent text-xs text-gray-300 py-1.5 outline-none w-36 placeholder:text-gray-600"
+                       onKeyDown={(e) => {
+                         if (e.key === 'Enter' && bulkTagInput.trim()) {
+                            const newTag = bulkTagInput.trim();
+                            setPlugins(prev => prev.map(p => selectedIds.has(p.id) ? { ...p, tags: [...new Set([...(p.tags || []), newTag])] } : p));
+                            setBulkTagInput("");
+                         }
+                       }}
+                     />
+                  </div>
+
+                  <button 
+                     onClick={handleAIAutoTag}
+                     disabled={isBulkCategorizing}
+                     className="text-[10px] uppercase font-bold tracking-widest bg-indigo-900/30 hover:bg-indigo-900/50 text-indigo-300 px-3 py-1.5 rounded flex items-center gap-2 border border-indigo-500/30 transition-colors ml-auto disabled:opacity-50"
+                  >
+                     {isBulkCategorizing ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Activity className="w-3 h-3" />}
+                     AI Auto-Tag
+                  </button>
+
+                  <button className="text-xs bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded flex items-center gap-2 border border-gray-700/50 transition-colors">
                     <Archive className="w-3 h-3 text-emerald-400" /> Offload
                   </button>
-                  <button className="text-xs bg-gray-800 hover:bg-red-900/30 px-3 py-1.5 rounded flex items-center gap-2 border border-gray-700/50 text-red-400">
+                  <button className="text-xs bg-gray-800 hover:bg-red-900/30 px-3 py-1.5 rounded flex items-center gap-2 border border-gray-700/50 text-red-500 transition-colors">
                     <Trash2 className="w-3 h-3" /> Mass Delete
                   </button>
                 </div>
@@ -812,6 +897,8 @@ export default function App() {
                         <th className="px-4 py-3 font-medium tracking-wider cursor-pointer hover:bg-gray-700/50 transition-colors" onClick={() => handleSort('category')}>
                           <div className="flex items-center gap-1">Category {sortConfig.key==='category' && (sortConfig.direction==='asc'?<ArrowUp className="w-3 h-3"/>:<ArrowDown className="w-3 h-3"/>)}</div>
                         </th>
+                        <th className="px-4 py-3 font-medium tracking-wider hover:bg-gray-700/50 transition-colors">Synthesis</th>
+                        <th className="px-4 py-3 font-medium tracking-wider hover:bg-gray-700/50 transition-colors">Saturation</th>
                         <th className="px-4 py-3 font-medium tracking-wider cursor-pointer hover:bg-gray-700/50 transition-colors" onClick={() => handleSort('rating')}>
                           <div className="flex items-center gap-1">Rating {sortConfig.key==='rating' && (sortConfig.direction==='asc'?<ArrowUp className="w-3 h-3"/>:<ArrowDown className="w-3 h-3"/>)}</div>
                         </th>
@@ -854,6 +941,8 @@ export default function App() {
                            </td>
                            <td className="px-4 py-0 text-blue-400">{plugin.manufacturer}</td>
                            <td className="px-4 py-0">{plugin.category}</td>
+                           <td className="px-4 py-0 text-gray-400">{plugin.synthesisType || '-'}</td>
+                           <td className="px-4 py-0 text-gray-400">{plugin.saturationType || '-'}</td>
                            <td className="px-4 py-0 text-amber-500 flex items-center gap-1 h-full">
                              {plugin.rating ? (
                                <div className="flex items-center mt-3">
@@ -940,6 +1029,22 @@ export default function App() {
                         placeholder="E.g. Synth, EQ"
                         onFilter={() => setSearchQuery(selectedPlugin.category)}
                       />
+                      <div className="grid grid-cols-2 gap-4">
+                        <Field 
+                          label="Synthesis Type" 
+                          icon={Activity}
+                          value={selectedPlugin.synthesisType || ''} 
+                          onChange={(val) => updatePluginField(selectedPlugin.id, 'synthesisType', val)}
+                          placeholder="e.g. Wavetable"
+                        />
+                        <Field 
+                          label="Saturation Type" 
+                          icon={Activity}
+                          value={selectedPlugin.saturationType || ''} 
+                          onChange={(val) => updatePluginField(selectedPlugin.id, 'saturationType', val)}
+                          placeholder="e.g. Tube"
+                        />
+                      </div>
                       <div>
                         <div className="flex items-center gap-2 mb-1.5 ml-1">
                           <Settings className="w-3 h-3 text-gray-500" />
@@ -1240,11 +1345,21 @@ function PluginCard({ plugin, isActive, onClick }: { plugin: PluginData, isActiv
         <h3 className="font-bold text-lg text-white group-hover:text-blue-400 transition-colors truncate">{plugin.name}</h3>
         <p className="text-xs text-gray-500 mb-3">{plugin.manufacturer}</p>
         
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <div className="flex items-center gap-1.5 px-2 py-1 bg-gray-950/50 rounded-lg border border-gray-800 group-hover:border-blue-500/30 transition-colors">
             <Tag className={cn("w-3 h-3 group-hover:text-blue-400 transition-colors", isActive ? "text-blue-500" : "text-gray-600")} />
             <span className={cn("text-[10px] font-medium uppercase tracking-wider transition-colors", isActive ? "text-blue-400" : "text-gray-400 group-hover:text-blue-300")}>{plugin.category}</span>
           </div>
+          {plugin.synthesisType && plugin.synthesisType !== 'None' && (
+             <div className="flex items-center gap-1.5 px-2 py-1 bg-indigo-500/10 rounded-lg border border-indigo-500/20">
+                <span className="text-[10px] font-medium uppercase tracking-wider text-indigo-400">{plugin.synthesisType}</span>
+             </div>
+          )}
+          {plugin.saturationType && plugin.saturationType !== 'None' && (
+             <div className="flex items-center gap-1.5 px-2 py-1 bg-pink-500/10 rounded-lg border border-pink-500/20">
+                <span className="text-[10px] font-medium uppercase tracking-wider text-pink-400">{plugin.saturationType}</span>
+             </div>
+          )}
           {plugin.rating && (
             <div className="flex items-center gap-0.5 px-2 py-1 bg-amber-500/10 rounded-lg border border-amber-500/20 text-amber-400">
                <Star className="w-3 h-3 fill-current" />

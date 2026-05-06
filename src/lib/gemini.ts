@@ -134,3 +134,58 @@ export async function generateWords(theme: string, count: number): Promise<strin
     return [];
   }
 }
+
+export interface BulkCategorizationResult {
+  [pluginId: string]: {
+    category?: string;
+    synthesisType?: 'Subtractive' | 'FM' | 'Wavetable' | 'Granular' | 'Additive' | 'Physical Modeling' | 'None';
+    saturationType?: 'Tube' | 'Tape' | 'Solid State' | 'Bitcrush' | 'Transformer' | 'None';
+    tags?: string[];
+  }
+}
+
+export async function bulkCategorizePlugins(plugins: {id: string, name: string, manufacturer: string}[]): Promise<BulkCategorizationResult | null> {
+  if (!process.env.GEMINI_API_KEY) return null;
+  try {
+    const listDescription = plugins.map(p => `ID: ${p.id} | Name: ${p.name} | Mfr: ${p.manufacturer}`).join('\n');
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: `You are an expert audio plugin librarian. Identify the Category, Synthesis Type, Saturation Type, and general tags for the following list of plugins.
+      Allowed Synthesis Types: Subtractive, FM, Wavetable, Granular, Additive, Physical Modeling, None.
+      Allowed Saturation Types: Tube, Tape, Solid State, Bitcrush, Transformer, None.
+      Tags should be 2-3 short descriptive terms.
+      
+      Plugins to categorize:
+      ${listDescription}
+      
+      Return a JSON object where the keys are the plugin IDs.`,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          description: "Map of plugin ID to its categorization",
+          additionalProperties: {
+            type: Type.OBJECT,
+            properties: {
+              category: { type: Type.STRING },
+              synthesisType: { type: Type.STRING },
+              saturationType: { type: Type.STRING },
+              tags: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING }
+              }
+            }
+          }
+        }
+      }
+    });
+
+    const text = response.text || '';
+    const cleanText = text.replace(/```json\n?/gi, '').replace(/```\n?/g, '').trim();
+    if (!cleanText) return null;
+    return JSON.parse(cleanText) as BulkCategorizationResult;
+  } catch (err) {
+    console.error("Error bulk categorizing:", err);
+    return null;
+  }
+}
